@@ -1,0 +1,75 @@
+kernel:
+  image: linuxkit/kernel:4.19.99
+  cmdline: "console=tty0 console=ttyS0 console=ttyAMA0"
+init:
+  - linuxkit/init:a4fcf333298f644dfac6adf680b83140927aa85e
+  - linuxkit/runc:69b4a35eaa22eba4990ee52cccc8f48f6c08ed03
+  - linuxkit/containerd:09553963ed9da626c25cf8acdf6d62ec37645412
+onboot:
+  - name: format
+    image: linuxkit/format:v0.7
+    command: ["/usr/bin/format", "-force", "-type", "xfs", "-label", "DATA", "-verbose", "/dev/sda"]
+  - name: mount
+    image: linuxkit/mount:v0.7
+    command: ["/usr/bin/mountie", "-label", "DATA", "/var/bla" ]
+  - name: dhcpcd
+    image: linuxkit/dhcpcd:v0.7
+    command: ["/sbin/dhcpcd", "--nobackground", "-f", "/dhcpcd.conf", "-1"]
+  - name: vrouter
+    image: vrouter
+    binds:
+     - /dev:/dev
+     - /lib/modules:/lib/modules
+    capabilities:
+     - all
+services:
+  - name: getty
+    image: linuxkit/getty:v0.7
+    env:
+     - INSECURE=true
+  - name: sshd
+    image: linuxkit/sshd:v0.7
+    cgroupsPath: systemreserved/sshd
+  - name: vsudd
+    image: linuxkit/vsudd:v0.7
+    binds:
+        - /run/containerd/containerd.sock:/run/containerd/containerd.sock
+    command: ["/vsudd",
+        "-inport", "2374:unix:/run/containerd/containerd.sock"]
+  - name: k3s
+    pid: host
+    env:
+     - INSECURE=true
+    image: k3s
+    mounts:
+    - type: cgroup
+      options: ["rw","nosuid","noexec","nodev","relatime"]
+    - type: bind
+      source: /sys/fs/cgroup
+      destination: /sys/fs/cgroup
+      options: ["rw","rbind","rshared","nosuid","noexec","nodev","relatime"]
+    runtime:
+      mkdir: ["/var/bla/rancher"]
+    binds:
+    - /var/bla/rancher:/var/lib/rancher
+    - /proc:/proc
+    - /dev:/dev
+    - /run:/run
+    - /tmp:/tmp
+    - /etc/resolv.conf:/etc/resolv.conf
+    rootfsPropagation: shared
+    cgroupsPath: podruntime/k3s
+    capabilities:
+    - all
+    command: ["/bin/sh","-c","sed -i \"s/127.0.0.1.*/127.0.0.1 $(hostname)/g\" /etc/hosts; echo $(ifconfig vhost0 |grep \"inet addr:\" |awk -F\":\" '{print $2}' |awk '{print $1}') $(hostname) >> /etc/hosts ; /k3s server --cluster-cidr=10.32.0.0/12 --service-cidr=10.96.0.0/12 --no-flannel --no-deploy=traefik"]
+    #command: ["/bin/sh","-c","while true;do sleep 10;done"]
+files:
+  - path: root/.ssh/authorized_keys
+    source: ~/.ssh/id_rsa.pub
+    mode: "0600"
+    optional: true
+  - path: /var/k3s/lower
+    directory: true
+trust:
+  org:
+    - linuxkit
